@@ -214,7 +214,7 @@ void RUN_child(proc *P, int N, int policy){
             finish++;
             waitpid(P[running].pid, NULL, 0);
             printf("%s %d\n", P[running].p_name, P[running].pid);
-            fflush(stdin);
+            fflush(stdout);
             running = -1;
             if (finish == N) break;
         }
