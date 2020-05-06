@@ -25,6 +25,16 @@ typedef struct {
     int pid;
 } proc;
 
+typedef struct rr{
+	int num;
+	struct rr* next;
+	struct rr* previous;
+} forRR;
+
+forRR* RR_head = NULL;
+forRR* RR_tail = NULL;
+forRR* RR_cur = NULL;
+
 void RUN_UNIT(){
     for (volatile unsigned long i = 0; i < 1000000UL; i++)
     ;
@@ -40,7 +50,7 @@ int set_policy(char *tmp);
 void INIT_P(proc *P, int N);
 int compare (const void * a, const void * b);
 int scheduler (proc *P, int N, int policy);
-
+void INIT_RR_QUEUE();
 
 
 int main(){
@@ -51,6 +61,7 @@ int main(){
     P = (proc *)malloc(N * sizeof(proc));
     for (int i = 0 ; i < N ; i++) scanf("%s%u%u", P[i].p_name, &P[i].t_ready, &P[i].t_exec);
     INIT_P(P, N);
+	if (policy == RR) INIT_RR_QUEUE(N);
     scheduler(P, N, policy);
     return 0;
 }
@@ -75,10 +86,28 @@ int set_policy(char *tmp){
     }
     return ERROR;
 }
+
+void INIT_RR_QUEUE(int N){ 
+	RR_head = malloc(sizeof(forRR));
+	RR_head->next = NULL;
+	RR_head->previous = NULL;
+	RR_head->num = -1;
+	RR_tail = RR_head;
+	// for (int i = 1 ; i < N ; i++){
+	// 	forRR* tmp = malloc(sizeof(forRR));
+	// 	tmp->num = i;
+	// 	tmp->previous = RR_tail;
+	// 	tmp->next = NULL;
+	// 	RR_tail->next = tmp;
+	// 	RR_tail = tmp;
+	// }
+	//RR_cur = RR_head;
+	return;
+}
 void INIT_P(proc *P, int N){
     qsort(P, N, sizeof(proc), compare);
     for (int i = 0 ; i < N ; i ++) P[i].pid = -1;
-    return ;
+    return;
 }
 int compare (const void * a, const void * b){
   return ((proc *)a)->t_ready - ((proc *)b)->t_ready;
@@ -146,20 +175,18 @@ int NEXT_proc(proc *P, int N, int policy, int running, int now, int RR_last){
             }
         }
         else if (policy == RR){
-            if (running == -1){
-                for (int i = 0 ; i < N ; i ++){
-                    if (P[i].pid != -1 && P[i].t_exec != 0){
-                        return i;
-                    }
-                }
+            if (running == -1 && RR_head->next == NULL){
+            	return -1;
+            }
+            else if (running == -1){
+            	return RR_cur->num;
             }
             else{
                 if ((now - RR_last) % 500 == 0){
-                    ret = (running+1) % N;
-                    while(P[ret].pid == -1 || P[ret].t_exec == 0){
-                        ret = (ret+1)%N;
+                	if (RR_cur->next == NULL) return running;
+                    else{
+                    	return RR_cur->next->num;
                     }
-                    return ret;
                 }
                 else{
                     return running;
@@ -206,6 +233,15 @@ void RUN_child(proc *P, int N, int policy){
         //fprintf(stderr, "while\n");
         for (int i = 0 ; i < N; i++){
             if (current_time == P[i].t_ready){
+	            if (policy == RR){
+	            	forRR* tmp = (forRR*) malloc(sizeof(forRR));
+	            	tmp->previous = RR_tail;
+	            	tmp->next = NULL;
+	            	tmp->num = i;
+	            	RR_tail->next = tmp;
+	            	RR_tail = tmp;
+	            	RR_cur = RR_head->next;
+	            }
                 FORK_proc(&P[i]); // Fork the process at the ready time.
                 IDLE_proc(P[i].pid); // After fork, block the proc.
             }
@@ -215,14 +251,40 @@ void RUN_child(proc *P, int N, int policy){
             waitpid(P[running].pid, NULL, 0);
             printf("%s %d\n", P[running].p_name, P[running].pid);
             fflush(stdout);
+	        if (policy == RR){
+	          	if (RR_cur->next == NULL){
+	          		RR_head -> next = NULL;
+	          		RR_cur = RR_head;
+	          	}
+	          	else {
+	          		RR_cur->previous->next = RR_cur->next;
+	          		RR_cur->next->previous = RR_cur->previous;
+	          		RR_cur = RR_cur->next;
+	          	}
+	        }
             running = -1;
             if (finish == N) break;
         }
         int choose = NEXT_proc(P, N, policy, running, current_time, RR_last);
         if (choose != -1){
-            if (choose != running){
+        	if (running == -1){
+        		START_proc(P[choose].pid);
+                running = choose;
+                RR_last = current_time;
+        	}
+            else if (choose != running){
+            	//printf("choose = %d running %d\n", choose, running);
                 //fprintf(stderr,"running = %d, choose = %d, current_time = %d\n", running, choose, current_time);
                 IDLE_proc(P[running].pid);
+              	if (policy == RR){
+              		RR_cur->next->previous = RR_cur->previous;
+	              	RR_cur->previous->next = RR_cur->next;
+	              	RR_cur->previous = RR_tail;
+	              	RR_tail->next = RR_cur;
+	              	RR_cur->next = NULL;
+	              	RR_cur = RR_head->next;
+	              	RR_tail = RR_tail->next;
+	            }
                 START_proc(P[choose].pid);
                 running = choose;
                 RR_last = current_time;
